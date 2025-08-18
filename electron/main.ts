@@ -4,6 +4,9 @@ import { WindowHelper } from "./WindowHelper"
 import { ScreenshotHelper } from "./ScreenshotHelper"
 import { ShortcutsHelper } from "./shortcuts"
 import { ProcessingHelper } from "./ProcessingHelper"
+import path from "path"
+
+const isDev = process.env.NODE_ENV === "development"
 
 export class AppState {
   private static instance: AppState | null = null
@@ -274,8 +277,40 @@ async function initializeApp() {
   // Initialize IPC handlers before window creation
   initializeIpcHandlers(appState)
 
+  // Set app security policies for stealth mode
+  app.commandLine.appendSwitch('disable-features', 'OutOfBlinkCors')
+  app.commandLine.appendSwitch('disable-web-security')
+  app.commandLine.appendSwitch('disable-background-timer-throttling')
+  app.commandLine.appendSwitch('disable-backgrounding-occluded-windows')
+  app.commandLine.appendSwitch('disable-renderer-backgrounding')
+  app.commandLine.appendSwitch('disable-dev-shm-usage')
+  app.commandLine.appendSwitch('no-sandbox')
+
+  // Prevent multiple instances
+  const gotTheLock = app.requestSingleInstanceLock()
+  if (!gotTheLock) {
+    app.quit()
+    return
+  }
+
+  app.on('second-instance', () => {
+    // Someone tried to run a second instance, focus our window instead
+    const mainWindow = appState.getMainWindow()
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore()
+      mainWindow.show()
+      mainWindow.focus()
+    }
+  })
+
   app.whenReady().then(() => {
     console.log("App is ready")
+    
+    // Set additional security for stealth mode
+    if (process.platform === 'darwin') {
+      app.dock?.hide() // Hide dock icon on macOS
+    }
+    
     appState.createWindow()
     appState.createTray()
     // Register global shortcuts using ShortcutsHelper
@@ -296,8 +331,20 @@ async function initializeApp() {
     }
   })
 
-  app.dock?.hide() // Hide dock icon (optional)
-  app.commandLine.appendSwitch("disable-background-timer-throttling")
+  // Prevent new window creation for security
+  app.on('web-contents-created', (event, contents) => {
+    contents.on('new-window', (event) => {
+      event.preventDefault()
+    })
+    
+    // Prevent navigation to external URLs
+    contents.on('will-navigate', (event, navigationUrl) => {
+      const parsedUrl = new URL(navigationUrl)
+      if (parsedUrl.origin !== 'http://localhost:5180' && parsedUrl.origin !== `file://`) {
+        event.preventDefault()
+      }
+    })
+  })
 }
 
 // Start the application
