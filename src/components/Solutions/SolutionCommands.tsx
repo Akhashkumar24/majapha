@@ -98,7 +98,7 @@ const SolutionCommands: React.FC<SolutionCommandsProps> = ({
             onMouseLeave={handleMouseLeave}
           >
             {/* Question mark circle */}
-            <div className="w-6 h-6 rounded-full bg-white/10 hover:bg-white/20 backdrop-blur-sm transition-colors flex items-center justify-center cursor-help z-10">
+            <div className="w-6 h-6 rounded-full bg-white/10 hover:bg-white/20 backdrop-blur-sm transition-colors flex items-center justify-center z-10">
               <span className="text-xs text-white/70">?</span>
             </div>
 
@@ -198,10 +198,9 @@ const SolutionCommands: React.FC<SolutionCommandsProps> = ({
             )}
           </div>
 
-          {/* Sign Out Button */}
+          {/* Sign Out Button - REMOVED TITLE ATTRIBUTE TO ELIMINATE TOOLTIP */}
           <button
-            className="text-red-500/70 hover:text-red-500/90 transition-colors hover:cursor-pointer"
-            title="Sign Out"
+            className="text-red-500/70 hover:text-red-500/90 transition-colors"
             onClick={() => window.electronAPI.quitApp()}
           >
             <IoLogOutOutline className="w-4 h-4" />
