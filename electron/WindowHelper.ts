@@ -1,6 +1,5 @@
-
 import { BrowserWindow, screen } from "electron"
-import { AppState } from "main"
+import { AppState } from "./main"
 import path from "node:path"
 
 const isDev = process.env.NODE_ENV === "development"
@@ -19,7 +18,7 @@ export class WindowHelper {
   // Initialize with explicit number type and 0 value
   private screenWidth: number = 0
   private screenHeight: number = 0
-  private step: number = 0
+  private step: number = 20
   private currentX: number = 0
   private currentY: number = 0
 
@@ -79,8 +78,11 @@ export class WindowHelper {
       minWidth: 300,
       minHeight: 200,
       webPreferences: {
-        nodeIntegration: true,
+        nodeIntegration: false,
         contextIsolation: true,
+        enableRemoteModule: false,
+        webSecurity: false,
+        allowRunningInsecureContent: true,
         preload: path.join(__dirname, "preload.js")
       },
       show: false, // Start hidden, then show after setup
@@ -94,12 +96,16 @@ export class WindowHelper {
       resizable: true,
       movable: true,
       x: 100, // Start at a visible position
-      y: 100
+      y: 100,
+      skipTaskbar: true,
+      titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'hidden'
     }
 
     this.mainWindow = new BrowserWindow(windowSettings)
-    // this.mainWindow.webContents.openDevTools()
+    
+    // Enhanced stealth settings
     this.mainWindow.setContentProtection(true)
+    this.mainWindow.setSkipTaskbar(true)
 
     if (process.platform === "darwin") {
       this.mainWindow.setVisibleOnAllWorkspaces(true, {
@@ -107,16 +113,34 @@ export class WindowHelper {
       })
       this.mainWindow.setHiddenInMissionControl(true)
       this.mainWindow.setAlwaysOnTop(true, "floating")
+      
+      // Additional macOS stealth settings
+      this.mainWindow.setVibrancy('ultra-dark')
     }
+    
     if (process.platform === "linux") {
       // Linux-specific optimizations for stealth overlays
       if (this.mainWindow.setHasShadow) {
         this.mainWindow.setHasShadow(false)
       }
       this.mainWindow.setFocusable(false)
-    } 
-    this.mainWindow.setSkipTaskbar(true)
+      
+      // Additional Linux stealth settings
+      this.mainWindow.setMenuBarVisibility(false)
+    }
+
+    if (process.platform === "win32") {
+      // Windows-specific stealth settings
+      this.mainWindow.setMenuBarVisibility(false)
+      this.mainWindow.setAutoHideMenuBar(true)
+    }
+
     this.mainWindow.setAlwaysOnTop(true)
+
+    // Enhanced dev tools handling
+    if (isDev) {
+      // this.mainWindow.webContents.openDevTools({ mode: 'detach' })
+    }
 
     this.mainWindow.loadURL(startUrl).catch((err) => {
       console.error("Failed to load URL:", err)
@@ -132,6 +156,22 @@ export class WindowHelper {
         this.mainWindow.setAlwaysOnTop(true)
         console.log("Window is now visible and centered")
       }
+    })
+
+    // Handle window events
+    this.mainWindow.webContents.on('before-input-event', (event, input) => {
+      // Block certain key combinations that might reveal the app
+      if (input.control && input.shift && input.key === 'I') {
+        event.preventDefault()
+      }
+      if (input.key === 'F12') {
+        event.preventDefault()
+      }
+    })
+
+    // Prevent new window creation
+    this.mainWindow.webContents.setWindowOpenHandler(() => {
+      return { action: 'deny' }
     })
 
     const bounds = this.mainWindow.getBounds()
@@ -169,6 +209,14 @@ export class WindowHelper {
       this.windowPosition = null
       this.windowSize = null
     })
+
+    // Handle focus events for stealth
+    this.mainWindow.on('blur', () => {
+      if (this.mainWindow) {
+        // Optionally hide window when it loses focus
+        // this.hideMainWindow()
+      }
+    })
   }
 
   public getMainWindow(): BrowserWindow | null {
@@ -176,7 +224,7 @@ export class WindowHelper {
   }
 
   public isVisible(): boolean {
-    return this.isWindowVisible
+    return this.isWindowVisible && this.mainWindow && this.mainWindow.isVisible()
   }
 
   public hideMainWindow(): void {
@@ -208,7 +256,7 @@ export class WindowHelper {
     }
 
     this.mainWindow.showInactive()
-
+    this.mainWindow.setAlwaysOnTop(true, "floating")
     this.isWindowVisible = true
   }
 
@@ -261,20 +309,19 @@ export class WindowHelper {
     this.centerWindow()
     this.mainWindow.show()
     this.mainWindow.focus()
-    this.mainWindow.setAlwaysOnTop(true)
+    this.mainWindow.setAlwaysOnTop(true, "floating")
     this.isWindowVisible = true
     
     console.log(`Window centered and shown`)
   }
 
-  // New methods for window movement
+  // Enhanced window movement methods
   public moveWindowRight(): void {
     if (!this.mainWindow) return
 
     const windowWidth = this.windowSize?.width || 0
     const halfWidth = windowWidth / 2
 
-    // Ensure currentX and currentY are numbers
     this.currentX = Number(this.currentX) || 0
     this.currentY = Number(this.currentY) || 0
 
@@ -294,7 +341,6 @@ export class WindowHelper {
     const windowWidth = this.windowSize?.width || 0
     const halfWidth = windowWidth / 2
 
-    // Ensure currentX and currentY are numbers
     this.currentX = Number(this.currentX) || 0
     this.currentY = Number(this.currentY) || 0
 
@@ -311,7 +357,6 @@ export class WindowHelper {
     const windowHeight = this.windowSize?.height || 0
     const halfHeight = windowHeight / 2
 
-    // Ensure currentX and currentY are numbers
     this.currentX = Number(this.currentX) || 0
     this.currentY = Number(this.currentY) || 0
 
@@ -331,7 +376,6 @@ export class WindowHelper {
     const windowHeight = this.windowSize?.height || 0
     const halfHeight = windowHeight / 2
 
-    // Ensure currentX and currentY are numbers
     this.currentX = Number(this.currentX) || 0
     this.currentY = Number(this.currentY) || 0
 
