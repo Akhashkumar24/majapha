@@ -19,7 +19,6 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
   const [mediaRecorder, setMediaRecorder] = useState<MediaRecorder | null>(null)
   const [audioResult, setAudioResult] = useState<string | null>(null)
   const chunks = useRef<Blob[]>([])
-  // Remove all chat-related state, handlers, and the Dialog overlay from this file.
 
   useEffect(() => {
     let tooltipHeight = 0
@@ -73,8 +72,6 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
     }
   }
 
-  // Remove handleChatSend function
-
   return (
     <div className="w-fit">
       <div className="text-xs text-white/90 liquid-glass-bar py-1 px-4 flex items-center justify-center gap-4 draggable-area">
@@ -90,9 +87,6 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
             </button>
           </div>
         </div>
-
-        {/* Screenshot */}
-        {/* Removed screenshot button from main bar for seamless screenshot-to-LLM UX */}
 
         {/* Solve Command */}
         {screenshots.length > 0 && (
@@ -135,16 +129,13 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
           </button>
         </div>
 
-        {/* Add this button in the main button row, before the separator and sign out */}
-        {/* Remove the Chat button */}
-
         {/* Question mark with tooltip */}
         <div
           className="relative inline-block"
           onMouseEnter={handleMouseEnter}
           onMouseLeave={handleMouseLeave}
         >
-          <div className="w-6 h-6 rounded-full bg-white/10 hover:bg-white/20 backdrop-blur-sm transition-colors flex items-center justify-center cursor-help z-10">
+          <div className="w-6 h-6 rounded-full bg-white/10 hover:bg-white/20 backdrop-blur-sm transition-colors flex items-center justify-center z-10">
             <span className="text-xs text-white/70">?</span>
           </div>
 
@@ -222,10 +213,9 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
         {/* Separator */}
         <div className="mx-2 h-4 w-px bg-white/20" />
 
-        {/* Sign Out Button - Moved to end */}
+        {/* Sign Out Button - REMOVED TITLE ATTRIBUTE TO ELIMINATE TOOLTIP */}
         <button
-          className="text-red-500/70 hover:text-red-500/90 transition-colors hover:cursor-pointer"
-          title="Sign Out"
+          className="text-red-500/70 hover:text-red-500/90 transition-colors"
           onClick={() => window.electronAPI.quitApp()}
         >
           <IoLogOutOutline className="w-4 h-4" />
@@ -237,8 +227,6 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
           <span className="font-semibold">Audio Result:</span> {audioResult}
         </div>
       )}
-      {/* Chat Dialog Overlay */}
-      {/* Remove the Dialog component */}
     </div>
   )
 }
