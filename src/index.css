@@ -2,6 +2,28 @@
 @tailwind components;
 @tailwind utilities;
 
+/* STEALTH MODE: Force default cursor everywhere */
+* {
+  cursor: default !important;
+}
+
+/* Override any cursor styles - including hover states */
+button,
+input,
+textarea,
+select,
+a,
+[role="button"],
+.hover\:cursor-pointer:hover,
+.cursor-pointer,
+.cursor-text,
+.cursor-help,
+.cursor-move,
+.cursor-grab,
+.cursor-grabbing {
+  cursor: default !important;
+}
+
 /* Liquid Glass Effect Base */
 .liquid-glass {
   background: rgba(255, 255, 255, 0.25);
@@ -66,7 +88,7 @@
   height: 32px;
   width: 100%;
   background: transparent;
-  cursor: move;
+  cursor: default !important; /* Force default cursor for stealth */
   position: relative;
   z-index: 1000;
   border-radius: 1rem 1rem 0 0;
@@ -75,18 +97,19 @@
 /* Make sure buttons and interactive elements are not draggable */
 button, input, select, textarea, .interactive {
   -webkit-app-region: no-drag;
+  cursor: default !important; /* Force default cursor for stealth */
 }
 
 /* Override for the liquid glass bar - make it draggable */
 .liquid-glass.draggable-area {
   -webkit-app-region: drag;
-  cursor: move;
+  cursor: default !important; /* Force default cursor for stealth */
 }
 
 /* But keep buttons inside clickable */
 .liquid-glass.draggable-area button {
   -webkit-app-region: no-drag;
-  cursor: pointer;
+  cursor: default !important; /* Force default cursor for stealth */
 }
 
 /* Add visual feedback for draggable area */
