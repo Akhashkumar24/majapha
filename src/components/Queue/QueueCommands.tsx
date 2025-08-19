@@ -36,39 +36,166 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
     setIsTooltipVisible(false)
   }
 
+  const createMixedAudioStream = async (): Promise<MediaStream> => {
+    try {
+      // Create audio context for mixing
+      const audioContext = new AudioContext()
+      const destination = audioContext.createMediaStreamDestination()
+
+      const streams: MediaStream[] = []
+      const sources: MediaStreamAudioSourceNode[] = []
+
+      try {
+        // Get microphone audio
+        const micStream = await navigator.mediaDevices.getUserMedia({ 
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true
+          } 
+        })
+        streams.push(micStream)
+        
+        // Create microphone source and connect to destination
+        const micSource = audioContext.createMediaStreamSource(micStream)
+        sources.push(micSource)
+        micSource.connect(destination)
+        console.log('✓ Microphone audio captured')
+      } catch (micError) {
+        console.warn('Could not capture microphone:', micError)
+      }
+
+      try {
+        // Get system audio using getDisplayMedia
+        const displayStream = await navigator.mediaDevices.getDisplayMedia({
+          video: false,
+          audio: {
+            echoCancellation: false,
+            noiseSuppression: false,
+            autoGainControl: false,
+            sampleRate: 44100,
+            channelCount: 2
+          } as any
+        })
+        
+        // Filter to get only audio tracks
+        const audioTracks = displayStream.getAudioTracks()
+        if (audioTracks.length > 0) {
+          const systemAudioStream = new MediaStream(audioTracks)
+          streams.push(systemAudioStream)
+          
+          // Create system audio source and connect to destination
+          const systemSource = audioContext.createMediaStreamSource(systemAudioStream)
+          sources.push(systemSource)
+          systemSource.connect(destination)
+          console.log('✓ System audio captured')
+        } else {
+          console.warn('No system audio tracks available')
+        }
+      } catch (systemError) {
+        console.warn('Could not capture system audio:', systemError)
+        // Continue with just microphone audio
+      }
+
+      // If no streams were captured, throw an error
+      if (streams.length === 0) {
+        throw new Error('No audio sources available')
+      }
+
+      // Return the mixed stream
+      const mixedStream = destination.stream
+      
+      // Store cleanup function
+      const cleanup = () => {
+        sources.forEach(source => source.disconnect())
+        streams.forEach(stream => {
+          stream.getTracks().forEach(track => track.stop())
+        })
+        audioContext.close()
+      }
+
+      // Add cleanup to the mixed stream for later use
+      ;(mixedStream as any)._cleanup = cleanup
+
+      return mixedStream
+    } catch (error) {
+      console.error('Error creating mixed audio stream:', error)
+      throw error
+    }
+  }
+
   const handleRecordClick = async () => {
     if (!isRecording) {
       // Start recording
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-        const recorder = new MediaRecorder(stream)
-        recorder.ondataavailable = (e) => chunks.current.push(e.data)
-        recorder.onstop = async () => {
-          const blob = new Blob(chunks.current, { type: chunks.current[0]?.type || 'audio/webm' })
-          chunks.current = []
-          const reader = new FileReader()
-          reader.onloadend = async () => {
-            const base64Data = (reader.result as string).split(',')[1]
-            try {
-              const result = await window.electronAPI.analyzeAudioFromBase64(base64Data, blob.type)
-              setAudioResult(result.text)
-            } catch (err) {
-              setAudioResult('Audio analysis failed.')
-            }
+        console.log('Starting enhanced audio recording...')
+        
+        // Get mixed audio stream (microphone + system audio)
+        const stream = await createMixedAudioStream()
+        
+        const recorder = new MediaRecorder(stream, {
+          mimeType: 'audio/webm;codecs=opus'
+        })
+        
+        recorder.ondataavailable = (e) => {
+          if (e.data.size > 0) {
+            chunks.current.push(e.data)
           }
-          reader.readAsDataURL(blob)
         }
+        
+        recorder.onstop = async () => {
+          try {
+            const blob = new Blob(chunks.current, { 
+              type: chunks.current[0]?.type || 'audio/webm' 
+            })
+            chunks.current = []
+            
+            // Clean up the stream
+            if ((stream as any)._cleanup) {
+              ;(stream as any)._cleanup()
+            }
+            
+            const reader = new FileReader()
+            reader.onloadend = async () => {
+              const base64Data = (reader.result as string).split(',')[1]
+              try {
+                const result = await window.electronAPI.analyzeAudioFromBase64(base64Data, blob.type)
+                setAudioResult(result.text)
+              } catch (err) {
+                setAudioResult('Audio analysis failed.')
+                console.error('Audio analysis error:', err)
+              }
+            }
+            reader.readAsDataURL(blob)
+          } catch (err) {
+            console.error('Error processing recorded audio:', err)
+            setAudioResult('Error processing audio.')
+          }
+        }
+        
+        recorder.onerror = (e) => {
+          console.error('MediaRecorder error:', e)
+          setAudioResult('Recording error occurred.')
+          setIsRecording(false)
+        }
+        
         setMediaRecorder(recorder)
-        recorder.start()
+        recorder.start(1000) // Collect data every second
         setIsRecording(true)
+        console.log('Enhanced recording started (mic + system audio)')
+        
       } catch (err) {
-        setAudioResult('Could not start recording.')
+        console.error('Could not start enhanced recording:', err)
+        setAudioResult('Could not start recording. Please check permissions.')
       }
     } else {
       // Stop recording
-      mediaRecorder?.stop()
+      if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+        mediaRecorder.stop()
+      }
       setIsRecording(false)
       setMediaRecorder(null)
+      console.log('Recording stopped')
     }
   }
 
@@ -103,17 +230,18 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
           </div>
         )}
 
-        {/* Voice Recording Button */}
+        {/* Enhanced Voice Recording Button */}
         <div className="flex items-center gap-2">
           <button
             className={`bg-white/10 hover:bg-white/20 transition-colors rounded-md px-2 py-1 text-[11px] leading-none text-white/70 flex items-center gap-1 ${isRecording ? 'bg-red-500/70 hover:bg-red-500/90' : ''}`}
             onClick={handleRecordClick}
             type="button"
+            title={isRecording ? "Recording mic + system audio..." : "Record mic + system audio"}
           >
             {isRecording ? (
               <span className="animate-pulse">● Stop Recording</span>
             ) : (
-              <span>🎤 Record Voice</span>
+              <span>🎤 Record Audio</span>
             )}
           </button>
         </div>
@@ -201,6 +329,21 @@ const QueueCommands: React.FC<QueueCommandsProps> = ({
                       </div>
                       <p className="text-[10px] leading-relaxed text-white/70 truncate">
                         Generate a solution based on the current problem.
+                      </p>
+                    </div>
+
+                    {/* Enhanced Audio Recording Info */}
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between">
+                        <span className="truncate">Record Audio</span>
+                        <div className="flex gap-1 flex-shrink-0">
+                          <span className="bg-white/10 px-1.5 py-0.5 rounded text-[10px] leading-none">
+                            🎤
+                          </span>
+                        </div>
+                      </div>
+                      <p className="text-[10px] leading-relaxed text-white/70">
+                        Captures both microphone and system audio (meeting voices, media sounds).
                       </p>
                     </div>
                   </div>
