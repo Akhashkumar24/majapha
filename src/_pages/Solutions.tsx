@@ -17,6 +17,85 @@ import { AudioResult } from "../types/audio"
 import SolutionCommands from "../components/Solutions/SolutionCommands"
 import Debug from "./Debug"
 
+// Enhanced audio capture function
+const createMixedAudioStream = async (): Promise<MediaStream> => {
+  try {
+    const audioContext = new AudioContext()
+    const destination = audioContext.createMediaStreamDestination()
+
+    const streams: MediaStream[] = []
+    const sources: MediaStreamAudioSourceNode[] = []
+
+    try {
+      // Get microphone audio
+      const micStream = await navigator.mediaDevices.getUserMedia({ 
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true
+        } 
+      })
+      streams.push(micStream)
+      
+      const micSource = audioContext.createMediaStreamSource(micStream)
+      sources.push(micSource)
+      micSource.connect(destination)
+      console.log('✓ Microphone audio captured')
+    } catch (micError) {
+      console.warn('Could not capture microphone:', micError)
+    }
+
+    try {
+      // Get system audio using getDisplayMedia
+      const displayStream = await navigator.mediaDevices.getDisplayMedia({
+        video: false,
+        audio: {
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false,
+          sampleRate: 44100,
+          channelCount: 2
+        } as any
+      })
+      
+      const audioTracks = displayStream.getAudioTracks()
+      if (audioTracks.length > 0) {
+        const systemAudioStream = new MediaStream(audioTracks)
+        streams.push(systemAudioStream)
+        
+        const systemSource = audioContext.createMediaStreamSource(systemAudioStream)
+        sources.push(systemSource)
+        systemSource.connect(destination)
+        console.log('✓ System audio captured')
+      } else {
+        console.warn('No system audio tracks available')
+      }
+    } catch (systemError) {
+      console.warn('Could not capture system audio:', systemError)
+    }
+
+    if (streams.length === 0) {
+      throw new Error('No audio sources available')
+    }
+
+    const mixedStream = destination.stream
+    
+    const cleanup = () => {
+      sources.forEach(source => source.disconnect())
+      streams.forEach(stream => {
+        stream.getTracks().forEach(track => track.stop())
+      })
+      audioContext.close()
+    }
+
+    ;(mixedStream as any)._cleanup = cleanup
+    return mixedStream
+  } catch (error) {
+    console.error('Error creating mixed audio stream:', error)
+    throw error
+  }
+}
+
 // (Using global ElectronAPI type from src/types/electron.d.ts)
 
 export const ContentSection = ({
@@ -255,39 +334,103 @@ const Solutions: React.FC<SolutionsProps> = ({ setView }) => {
         setCustomContent(null)
         setAudioResult(null)
 
-        // Start audio recording from user's microphone
+        // Start enhanced audio recording from user's microphone AND system audio
         try {
-          const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-          const mediaRecorder = new MediaRecorder(stream)
+          console.log('Starting enhanced audio recording (mic + system)...')
+          const stream = await createMixedAudioStream()
+          const mediaRecorder = new MediaRecorder(stream, {
+            mimeType: 'audio/webm;codecs=opus'
+          })
           const chunks: Blob[] = []
-          mediaRecorder.ondataavailable = (e) => chunks.push(e.data)
-          mediaRecorder.start()
+          
+          mediaRecorder.ondataavailable = (e) => {
+            if (e.data.size > 0) {
+              chunks.push(e.data)
+            }
+          }
+          
+          mediaRecorder.start(1000)
           setAudioRecording(true)
+          
           // Record for 5 seconds (or adjust as needed)
-          setTimeout(() => mediaRecorder.stop(), 5000)
+          setTimeout(() => {
+            if (mediaRecorder.state !== 'inactive') {
+              mediaRecorder.stop()
+            }
+          }, 5000)
+          
           mediaRecorder.onstop = async () => {
             setAudioRecording(false)
-            const blob = new Blob(chunks, { type: chunks[0]?.type || 'audio/webm' })
-            const reader = new FileReader()
-            reader.onloadend = async () => {
-              const base64Data = (reader.result as string).split(',')[1]
-              // Send audio to Gemini for analysis
-              try {
-                const result = await window.electronAPI.analyzeAudioFromBase64(
-                  base64Data,
-                  blob.type
-                )
-                // Store result in react-query cache
-                queryClient.setQueryData(["audio_result"], result)
-                setAudioResult(result)
-              } catch (err) {
-                console.error('Audio analysis failed:', err)
+            
+            try {
+              if (chunks.length > 0) {
+                const blob = new Blob(chunks, { type: 'audio/webm' })
+                const reader = new FileReader()
+                reader.onloadend = async () => {
+                  const base64Data = (reader.result as string).split(',')[1]
+                  try {
+                    const result = await window.electronAPI.analyzeAudioFromBase64(
+                      base64Data,
+                      blob.type
+                    )
+                    // Store result in react-query cache
+                    queryClient.setQueryData(["audio_result"], result)
+                    setAudioResult(result)
+                    console.log('Enhanced audio analysis completed:', result.text.substring(0, 50) + '...')
+                  } catch (err) {
+                    console.error('Enhanced audio analysis failed:', err)
+                  }
+                }
+                reader.readAsDataURL(blob)
               }
+              
+              // Clean up the mixed stream
+              if ((stream as any)._cleanup) {
+                ;(stream as any)._cleanup()
+              }
+            } catch (err) {
+              console.error('Error processing enhanced audio:', err)
             }
-            reader.readAsDataURL(blob)
           }
+          
+          mediaRecorder.onerror = (e) => {
+            console.error('Enhanced MediaRecorder error:', e)
+            setAudioRecording(false)
+          }
+          
         } catch (err) {
-          console.error('Audio recording error:', err)
+          console.error('Enhanced audio recording error:', err)
+          // Fallback to microphone only
+          try {
+            const micStream = await navigator.mediaDevices.getUserMedia({ audio: true })
+            const mediaRecorder = new MediaRecorder(micStream)
+            const chunks: Blob[] = []
+            mediaRecorder.ondataavailable = (e) => chunks.push(e.data)
+            mediaRecorder.start()
+            setAudioRecording(true)
+            setTimeout(() => mediaRecorder.stop(), 5000)
+            mediaRecorder.onstop = async () => {
+              setAudioRecording(false)
+              const blob = new Blob(chunks, { type: chunks[0]?.type || 'audio/webm' })
+              const reader = new FileReader()
+              reader.onloadend = async () => {
+                const base64Data = (reader.result as string).split(',')[1]
+                try {
+                  const result = await window.electronAPI.analyzeAudioFromBase64(
+                    base64Data,
+                    blob.type
+                  )
+                  queryClient.setQueryData(["audio_result"], result)
+                  setAudioResult(result)
+                } catch (err) {
+                  console.error('Fallback audio analysis failed:', err)
+                }
+              }
+              reader.readAsDataURL(blob)
+            }
+          } catch (fallbackErr) {
+            console.error('Fallback microphone recording failed:', fallbackErr)
+          }
         }
 
         // Simulate receiving custom content shortly after start
@@ -399,13 +542,13 @@ const Solutions: React.FC<SolutionsProps> = ({ setView }) => {
           setProblemStatementData({
             problem_statement: audioResult.text,
             input_format: {
-              description: "Generated from audio input",
+              description: "Generated from enhanced audio input (mic + system)",
               parameters: []
             },
             output_format: {
-              description: "Generated from audio input",
+              description: "Generated from enhanced audio input (mic + system)",
               type: "string",
-              subtype: "text"
+              subtype: "voice"
             },
             complexity: {
               time: "N/A",
@@ -492,7 +635,7 @@ const Solutions: React.FC<SolutionsProps> = ({ setView }) => {
                 {/* Show Screenshot or Audio Result as main output if validation_type is manual */}
                 {problemStatementData?.validation_type === "manual" ? (
                   <ContentSection
-                    title={problemStatementData?.output_format?.subtype === "voice" ? "Audio Result" : "Screenshot Result"}
+                    title={problemStatementData?.output_format?.subtype === "voice" ? "Enhanced Audio Result" : "Screenshot Result"}
                     content={problemStatementData.problem_statement}
                     isLoading={false}
                   />
@@ -500,7 +643,7 @@ const Solutions: React.FC<SolutionsProps> = ({ setView }) => {
                   <>
                     {/* Problem Statement Section - Only for non-manual */}
                     <ContentSection
-                      title={problemStatementData?.output_format?.subtype === "voice" ? "Voice Input" : "Problem Statement"}
+                      title={problemStatementData?.output_format?.subtype === "voice" ? "Enhanced Voice Input" : "Problem Statement"}
                       content={problemStatementData?.problem_statement}
                       isLoading={!problemStatementData}
                     />
@@ -509,7 +652,7 @@ const Solutions: React.FC<SolutionsProps> = ({ setView }) => {
                       <div className="mt-4 flex">
                         <p className="text-xs bg-gradient-to-r from-gray-300 via-gray-100 to-gray-300 bg-clip-text text-transparent animate-pulse">
                           {problemStatementData?.output_format?.subtype === "voice" 
-                            ? "Processing voice input..." 
+                            ? "Processing enhanced voice input..." 
                             : "Generating solutions..."}
                         </p>
                       </div>
