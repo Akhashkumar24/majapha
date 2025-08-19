@@ -98,6 +98,81 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
     }
   }
 
+  // Enhanced audio capture function for automatic analysis
+  const createMixedAudioStream = async (): Promise<MediaStream> => {
+    try {
+      const audioContext = new AudioContext()
+      const destination = audioContext.createMediaStreamDestination()
+
+      const streams: MediaStream[] = []
+      const sources: MediaStreamAudioSourceNode[] = []
+
+      try {
+        // Get microphone audio
+        const micStream = await navigator.mediaDevices.getUserMedia({ 
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true
+          } 
+        })
+        streams.push(micStream)
+        
+        const micSource = audioContext.createMediaStreamSource(micStream)
+        sources.push(micSource)
+        micSource.connect(destination)
+      } catch (micError) {
+        console.warn('Could not capture microphone:', micError)
+      }
+
+      try {
+        // Get system audio
+        const displayStream = await navigator.mediaDevices.getDisplayMedia({
+          video: false,
+          audio: {
+            echoCancellation: false,
+            noiseSuppression: false,
+            autoGainControl: false,
+            sampleRate: 44100,
+            channelCount: 2
+          } as any
+        })
+        
+        const audioTracks = displayStream.getAudioTracks()
+        if (audioTracks.length > 0) {
+          const systemAudioStream = new MediaStream(audioTracks)
+          streams.push(systemAudioStream)
+          
+          const systemSource = audioContext.createMediaStreamSource(systemAudioStream)
+          sources.push(systemSource)
+          systemSource.connect(destination)
+        }
+      } catch (systemError) {
+        console.warn('Could not capture system audio:', systemError)
+      }
+
+      if (streams.length === 0) {
+        throw new Error('No audio sources available')
+      }
+
+      const mixedStream = destination.stream
+      
+      const cleanup = () => {
+        sources.forEach(source => source.disconnect())
+        streams.forEach(stream => {
+          stream.getTracks().forEach(track => track.stop())
+        })
+        audioContext.close()
+      }
+
+      ;(mixedStream as any)._cleanup = cleanup
+      return mixedStream
+    } catch (error) {
+      console.error('Error creating mixed audio stream:', error)
+      throw error
+    }
+  }
+
   useEffect(() => {
     const updateDimensions = () => {
       if (contentRef.current) {
@@ -146,21 +221,77 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
     }
   }, [isTooltipVisible, tooltipHeight])
 
-  // Seamless screenshot-to-LLM flow
+  // Enhanced screenshot-to-LLM flow with mixed audio
   useEffect(() => {
-    // Listen for screenshot taken event
     const unsubscribe = window.electronAPI.onScreenshotTaken(async (data) => {
-      // Refetch screenshots to update the queue
       await refetch();
-      // Show loading in chat
       setChatLoading(true);
+      
       try {
-        // Get the latest screenshot path
+        // Start enhanced audio recording when screenshot is taken
+        let audioStream: MediaStream | null = null
+        let recorder: MediaRecorder | null = null
+        let audioChunks: Blob[] = []
+        
+        try {
+          audioStream = await createMixedAudioStream()
+          recorder = new MediaRecorder(audioStream, {
+            mimeType: 'audio/webm;codecs=opus'
+          })
+          
+          recorder.ondataavailable = (e) => {
+            if (e.data.size > 0) {
+              audioChunks.push(e.data)
+            }
+          }
+          
+          recorder.start(1000)
+          console.log('Auto-recording started (mic + system audio)')
+          
+          // Stop recording after 3 seconds
+          setTimeout(() => {
+            if (recorder && recorder.state !== 'inactive') {
+              recorder.stop()
+            }
+          }, 3000)
+          
+          recorder.onstop = async () => {
+            try {
+              if (audioChunks.length > 0) {
+                const blob = new Blob(audioChunks, { type: 'audio/webm' })
+                const reader = new FileReader()
+                reader.onloadend = async () => {
+                  const base64Data = (reader.result as string).split(',')[1]
+                  try {
+                    const audioResult = await window.electronAPI.analyzeAudioFromBase64(base64Data, blob.type)
+                    setChatMessages((msgs) => [...msgs, { 
+                      role: "gemini", 
+                      text: `🎤 Audio: ${audioResult.text}` 
+                    }])
+                  } catch (err) {
+                    console.error('Audio analysis failed:', err)
+                  }
+                }
+                reader.readAsDataURL(blob)
+              }
+              
+              // Clean up audio stream
+              if ((audioStream as any)?._cleanup) {
+                ;(audioStream as any)._cleanup()
+              }
+            } catch (err) {
+              console.error('Error processing auto-recorded audio:', err)
+            }
+          }
+        } catch (audioErr) {
+          console.warn('Could not start auto audio recording:', audioErr)
+        }
+        
+        // Process the screenshot
         const latest = data?.path || (Array.isArray(data) && data.length > 0 && data[data.length - 1]?.path);
         if (latest) {
-          // Call the LLM to process the screenshot
           const response = await window.electronAPI.invoke("analyze-image-file", latest);
-          setChatMessages((msgs) => [...msgs, { role: "gemini", text: response.text }]);
+          setChatMessages((msgs) => [...msgs, { role: "gemini", text: `📸 Image: ${response.text}` }]);
         }
       } catch (err) {
         setChatMessages((msgs) => [...msgs, { role: "gemini", text: "Error: " + String(err) }]);
@@ -168,6 +299,7 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
         setChatLoading(false);
       }
     });
+    
     return () => {
       unsubscribe && unsubscribe();
     };
@@ -181,7 +313,6 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
   const handleChatToggle = () => {
     setIsChatOpen(!isChatOpen)
   }
-
 
   return (
     <div
@@ -219,7 +350,7 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
                 <div className="text-sm text-gray-600 text-center mt-8">
                   💬 Chat with Gemini 2.5 Flash
                   <br />
-                  <span className="text-xs text-gray-500">Take a screenshot (Cmd+H) for automatic analysis</span>
+                  <span className="text-xs text-gray-500">Take a screenshot (Cmd+H) for automatic analysis with audio</span>
                 </div>
               ) : (
                 chatMessages.map((msg, idx) => (
@@ -247,7 +378,7 @@ const Queue: React.FC<QueueProps> = ({ setView }) => {
                       <span className="animate-pulse text-gray-400">●</span>
                       <span className="animate-pulse animation-delay-200 text-gray-400">●</span>
                       <span className="animate-pulse animation-delay-400 text-gray-400">●</span>
-                      <span className="ml-2">Gemini is thinking...</span>
+                      <span className="ml-2">Analyzing image + audio...</span>
                     </span>
                   </div>
                 </div>
