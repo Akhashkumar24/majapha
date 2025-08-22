@@ -80,7 +80,7 @@ export class WindowHelper {
       webPreferences: {
         nodeIntegration: false,
         contextIsolation: true,
-        enableRemoteModule: false,
+        // Removed deprecated enableRemoteModule property
         webSecurity: false,
         allowRunningInsecureContent: true,
         preload: path.join(__dirname, "preload.js")
@@ -114,8 +114,8 @@ export class WindowHelper {
       this.mainWindow.setHiddenInMissionControl(true)
       this.mainWindow.setAlwaysOnTop(true, "floating")
       
-      // Additional macOS stealth settings
-      this.mainWindow.setVibrancy('ultra-dark')
+      // Fixed: Use correct vibrancy type
+      this.mainWindow.setVibrancy('under-window')
     }
     
     if (process.platform === "linux") {
