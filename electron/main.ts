@@ -333,16 +333,17 @@ async function initializeApp() {
 
   // Prevent new window creation for security
   app.on('web-contents-created', (event, contents) => {
-    contents.on('new-window', (event) => {
-      event.preventDefault()
-    })
-    
-    // Prevent navigation to external URLs
+    // Fixed: Use 'will-navigate' event handler instead of deprecated 'new-window'
     contents.on('will-navigate', (event, navigationUrl) => {
       const parsedUrl = new URL(navigationUrl)
       if (parsedUrl.origin !== 'http://localhost:5180' && parsedUrl.origin !== `file://`) {
         event.preventDefault()
       }
+    })
+    
+    // Handle new window requests (replacement for deprecated 'new-window')
+    contents.setWindowOpenHandler(() => {
+      return { action: 'deny' }
     })
   })
 }
