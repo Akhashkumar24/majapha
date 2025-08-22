@@ -7,7 +7,7 @@
     "dev": "vite --port 5180",
     "build": "npm run clean && tsc && vite build",
     "preview": "vite preview",
-    "electron:dev": "tsc -p electron/tsconfig.json && NODE_ENV=development electron .",
+    "electron:dev": "tsc -p electron/tsconfig.json && cross-env NODE_ENV=development electron .",
     "app:dev": "concurrently \"vite --port 5180\" \"wait-on http://localhost:5180 && npm run electron:dev\"",
     "app:build": "npm run build && electron-builder",
     "watch": "tsc -p electron/tsconfig.json --watch",
